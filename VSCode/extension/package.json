@@ -1,0 +1,25 @@
+{
+  "name": "waiting",
+  "displayName": "Waiting",
+  "description": "Lets the Waiting menu bar app see and focus this window's terminals.",
+  "version": "0.1.0",
+  "publisher": "waitingdev",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri"
+  ],
+  "main": "./extension.js"
+}

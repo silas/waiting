@@ -1,0 +1,85 @@
+#!/bin/bash
+# Git pre-commit hook. It checks the staged contents, not the working tree, so partially staged
+# files are judged by what's actually being committed:
+# - Swift files must be formatted with swift-format.
+# - Property lists, the Xcode project, JSON and XML files must parse.
+# - Changes to the VS Code extension must bump its version, the same in package.json and
+#   extension.vsixmanifest (the app detects extension updates by version).
+#
+# Install in a checkout with:
+#   ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+#
+# Skip the checks with `git commit --no-verify`.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+PACKAGE_JSON=VSCode/extension/package.json
+VSIX_MANIFEST=VSCode/extension.vsixmanifest
+
+errors=()
+unformatted=()
+
+staged() {
+    git show ":$1"
+}
+
+package_version() {
+    plutil -extract version raw -o - -
+}
+
+manifest_version() {
+    sed -nE 's/.*<Identity [^>]*Version="([^"]+)".*/\1/p' | head -n 1
+}
+
+while IFS= read -r -d '' file; do
+    case "$file" in
+    *.swift)
+        if ! staged "$file" | xcrun swift-format lint --strict --assume-filename "$file" - >&2; then
+            unformatted+=("$file")
+        fi
+        ;;
+    *.plist | *.entitlements | *.pbxproj)
+        if ! staged "$file" | plutil -lint - >/dev/null 2>&1; then
+            errors+=("$file is not a valid property list")
+        fi
+        ;;
+    *.json)
+        if ! staged "$file" | plutil -convert json -o /dev/null - 2>/dev/null; then
+            errors+=("$file is not valid JSON")
+        fi
+        ;;
+    *.xml | *.vsixmanifest)
+        if ! staged "$file" | xmllint --noout - 2>/dev/null; then
+            errors+=("$file is not valid XML")
+        fi
+        ;;
+    esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [[ -n "$(git diff --cached --name-only -- VSCode)" ]]; then
+    package=$(staged "$PACKAGE_JSON" | package_version 2>/dev/null || true)
+    manifest=$(staged "$VSIX_MANIFEST" | manifest_version 2>/dev/null || true)
+    previous=$(git show "HEAD:$PACKAGE_JSON" 2>/dev/null | package_version 2>/dev/null || true)
+    if [[ -z "$package" || -z "$manifest" ]]; then
+        errors+=("couldn't read the VS Code extension version from $PACKAGE_JSON and $VSIX_MANIFEST")
+    elif [[ "$package" != "$manifest" ]]; then
+        errors+=("VS Code extension versions differ: $PACKAGE_JSON has $package, $VSIX_MANIFEST has $manifest")
+    elif [[ "$package" == "$previous" ]]; then
+        errors+=("VS Code extension changed but its version is still $package; bump it in $PACKAGE_JSON and $VSIX_MANIFEST")
+    fi
+fi
+
+if ((${#unformatted[@]})); then
+    printf '\nerror: swift-format found issues in staged files. Fix them with:\n' >&2
+    printf '  xcrun swift-format format --in-place' >&2
+    printf ' %q' "${unformatted[@]}" >&2
+    echo >&2
+fi
+for error in ${errors[@]+"${errors[@]}"}; do
+    echo "error: $error" >&2
+done
+
+if ((${#unformatted[@]} + ${#errors[@]})); then
+    exit 1
+fi
