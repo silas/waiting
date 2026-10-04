@@ -7,7 +7,7 @@ R2_REMOTE ?= r2
 # Disk image for the website's fixed download link, built by `release`
 DMG := build/release/Waiting.dmg
 
-.PHONY: help build run stop setup-claude setup-vscode event format lint hooks release upload clean
+.PHONY: help build run stop reset setup-claude setup-codex setup-vscode event format lint hooks release upload clean
 
 help: ## List the targets
 	@awk -F ':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -21,15 +21,27 @@ run: build stop ## Build, quit any running copy and launch the app
 stop: ## Quit the running app
 	@pkill -x Waiting && while pgrep -x Waiting >/dev/null; do sleep 0.1; done || true
 
+# By path: a stale ~/Library/Containers/dev.waiting.mac makes `defaults delete dev.waiting.mac`
+# read the container's preferences instead. Application Support's vscode/ is the editor
+# extension's state, so only the saved sessions go.
+reset: stop ## Quit the app and delete its settings, saved sessions, caches and permission approvals (keeps agent hooks and editor extensions)
+	-@defaults delete "$(HOME)/Library/Preferences/dev.waiting.mac.plist" 2>/dev/null
+	rm -f "$(HOME)/Library/Application Support/dev.waiting.mac/sessions.json"
+	rm -rf "$(HOME)/Library/Caches/dev.waiting.mac" "$(HOME)/Library/HTTPStorages/dev.waiting.mac"
+	tccutil reset All dev.waiting.mac
+
 setup-claude: build ## Install the Claude Code hooks, pointing at this build's CLI
 	$(CLI) setup claude
+
+setup-codex: build ## Install the Codex hooks, pointing at this build's CLI
+	$(CLI) setup codex
 
 setup-vscode: build ## Install the VS Code extension
 	$(CLI) setup vscode
 
-event: ## Send a test Claude Code hook event (EVENT=Stop, SESSION=s1, CWD=/tmp/demo)
+event: ## Send a test hook event (AGENT=claude or codex, EVENT=Stop, SESSION=s1, CWD=/tmp/demo)
 	echo '{"session_id":"$(or $(SESSION),s1)","hook_event_name":"$(or $(EVENT),Stop)","cwd":"$(or $(CWD),/tmp/demo)"}' \
-		| $(CLI) hook claude
+		| $(CLI) hook $(or $(AGENT),claude)
 
 format: ## Format Swift sources in place
 	xcrun swift-format format --in-place --recursive $(SOURCES)

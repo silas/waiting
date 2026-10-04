@@ -18,10 +18,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
   }
 
   var defaultShortcut: Shortcut? {
-    let modifiers = controlKey | optionKey | cmdKey
     switch self {
-    case .showNext: return Shortcut(keyCode: kVK_ANSI_L, modifiers: modifiers, key: "L")
-    case .openMenu: return Shortcut(keyCode: kVK_ANSI_O, modifiers: modifiers, key: "O")
+    case .showNext:
+      return Shortcut(keyCode: kVK_ANSI_L, modifiers: controlKey | optionKey | cmdKey, key: "L")
+    case .openMenu:
+      return Shortcut(keyCode: kVK_ANSI_L, modifiers: controlKey | shiftKey | cmdKey, key: "L")
     }
   }
 

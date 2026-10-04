@@ -49,7 +49,8 @@ import Observation
     update(
       adapter.focusedTabKey().map {
         Focus(
-          bundleID: bundleID, tabKey: $0, tmuxViews: Tmux.views(in: bundleID, servers: tmuxServers))
+          bundleID: bundleID, tabKey: $0,
+          tmuxViews: Tmux.views(in: bundleID, servers: tmuxServers))
       })
     if timer == nil {
       timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in

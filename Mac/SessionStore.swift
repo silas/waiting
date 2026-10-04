@@ -7,6 +7,8 @@ struct Session: Codable, Identifiable {
   let agent: String
   var status: SessionState
   var cwd: String?
+  /// The agent's title for the session (its `/rename` name or generated title), if any.
+  var title: String?
   var message: String?
   var terminal: TerminalLocation?
   /// Tab key worked out by the app, for terminals whose tabs can't be identified from `terminal`
@@ -26,6 +28,11 @@ struct Session: Codable, Identifiable {
   /// `Tmux.outer`'s session, whose `terminal` is the tmux client's.
   var learnedTabKey: String? {
     learnedTab.flatMap { $0.terminal == terminal ? $0.key : nil }
+  }
+
+  /// The name shown for the session: its working directory's name.
+  var name: String {
+    cwd.map { URL(filePath: $0).lastPathComponent } ?? id
   }
 }
 
@@ -62,7 +69,7 @@ struct Session: Codable, Identifiable {
   }
 
   /// Called when a session starts needing input and isn't in the focused tab.
-  @ObservationIgnored var onStartWaiting: (() -> Void)?
+  @ObservationIgnored var onStartWaiting: ((Session) -> Void)?
 
   /// Sessions waiting on a human first, longest-waiting first; then the rest, most recent first.
   var sorted: [Session] {
@@ -148,25 +155,32 @@ struct Session: Codable, Identifiable {
 
   /// Switches to the session's terminal tab and clears its needs-input indicator until the next
   /// event raises it again. Sessions whose tab or terminal is gone are removed, and return false.
+  /// Only call it when the user asked: it runs scripts even while they're paused (see
+  /// `AppleScriptRunner.isPaused`), since a paused script would look like the tab is gone.
   @discardableResult func show(_ session: Session) -> Bool {
-    learnTabKey(session.id, userIsHere: false)
-    guard let session = sessions[session.id], TerminalAdapters.show(session) else {
-      remove(session)
-      return false
+    AppleScriptRunner.userInitiated {
+      learnTabKey(session.id, userIsHere: false)
+      guard let session = sessions[session.id], TerminalAdapters.show(session) else {
+        remove(session)
+        return false
+      }
+      markSeen(session.id)
+      lastShownID = session.id
+      // Switching tabs within an already-frontmost terminal doesn't post an activation
+      // notification.
+      focus.refresh()
+      return true
     }
-    markSeen(session.id)
-    lastShownID = session.id
-    // Switching tabs within an already-frontmost terminal doesn't post an activation notification.
-    focus.refresh()
-    return true
   }
 
   /// Shows the session that has been waiting on the user the longest. When none are waiting,
   /// cycles through the menu order instead: the session after the one in the focused tab, or the
   /// first session if the focused tab isn't one of ours. Sessions that are gone are skipped.
   func showNext() {
-    focus.refresh()
-    while let next = nextSession(), !show(next) {}
+    AppleScriptRunner.userInitiated {
+      focus.refresh()
+      while let next = nextSession(), !show(next) {}
+    }
   }
 
   private func nextSession() -> Session? {
@@ -241,6 +255,7 @@ struct Session: Codable, Identifiable {
       ?? Session(id: id, agent: event.agent, status: event.state, lastUpdated: event.timestamp)
     session.status = event.state
     session.cwd = event.cwd ?? session.cwd
+    session.title = event.title ?? session.title
     session.message = event.state == .needsInput ? event.message : nil
     // A different terminal (e.g. resumed elsewhere) makes the learned tab key stale.
     session.terminal = event.terminal ?? session.terminal
@@ -269,8 +284,9 @@ struct Session: Codable, Identifiable {
       // Check focus now so a session in the frontmost tab is marked seen before the icon renders.
       focus.refresh()
       markFocusedSeen()
-      if previous?.status != .needsInput, sessions[id]?.status == .needsInput {
-        onStartWaiting?()
+      if previous?.status != .needsInput, let session = sessions[id], session.status == .needsInput
+      {
+        onStartWaiting?(session)
       }
     }
   }

@@ -5,6 +5,7 @@ nonisolated private struct HookInput: Decodable {
   let sessionID: String
   let hookEventName: String
   let cwd: String?
+  let transcriptPath: String?
   let message: String?
   let notificationType: String?
   /// SessionStart: `startup`, `resume`, `clear`, `compact` or `fork`.
@@ -16,19 +17,13 @@ nonisolated private struct HookInput: Decodable {
     case sessionID = "session_id"
     case hookEventName = "hook_event_name"
     case cwd
+    case transcriptPath = "transcript_path"
     case message
     case notificationType = "notification_type"
     case source
     case trigger
   }
 }
-
-/// The hook events `waiting setup claude` installs. Keep in sync with the mapping below.
-let claudeHookEvents = [
-  "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop",
-  "PreCompact",
-  "SessionEnd",
-]
 
 /// Maps a Claude Code hook input to an `AgentEvent`, or nil if the hook doesn't change session state.
 func claudeEvent(from data: Data) -> AgentEvent? {
@@ -67,6 +62,9 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     sessionID: input.sessionID,
     state: state,
     cwd: input.cwd,
+    // Not for the frequent tool hooks, so they don't read the transcript.
+    title: ["Stop", "Notification", "UserPromptSubmit", "SessionStart"].contains(
+      input.hookEventName) ? input.transcriptPath.flatMap(ClaudeTranscript.title) : nil,
     message: input.message,
     terminal: .detect(),
     process: .detectAgent(),

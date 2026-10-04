@@ -25,6 +25,19 @@ nonisolated enum ProcessTable {
     return info
   }
 
+  /// Every process of the current user.
+  static func userProcesses() -> [kinfo_proc] {
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_UID, Int32(bitPattern: getuid())]
+    var size = 0
+    guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0 else { return [] }
+    // Room for processes started in between.
+    size += size / 8
+    let stride = MemoryLayout<kinfo_proc>.stride
+    var processes = [kinfo_proc](repeating: kinfo_proc(), count: size / stride)
+    guard sysctl(&mib, u_int(mib.count), &processes, &size, nil, 0) == 0 else { return [] }
+    return Array(processes.prefix(size / stride))
+  }
+
   /// The process and its ancestors, stopping before launchd.
   static func ancestors(of start: pid_t = getpid()) -> [pid_t] {
     var pids: [pid_t] = []
@@ -57,9 +70,25 @@ nonisolated enum ProcessTable {
     return String(cString: buffer)
   }
 
+  /// The process's current working directory. Only readable for processes of the same user.
+  static func currentDirectory(_ pid: pid_t) -> String? {
+    var info = proc_vnodepathinfo()
+    let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+    guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+    return withUnsafeBytes(of: info.pvi_cdir.vip_path) { buffer in
+      String(decoding: buffer.prefix { $0 != 0 }, as: UTF8.self)
+    }
+  }
+
   /// The process's environment, as it was when it started. Only readable for processes of the
   /// same user.
   static func environment(_ pid: pid_t) -> [String: String]? {
+    commandLine(pid)?.environment
+  }
+
+  /// The process's arguments (starting with `argv[0]`) and environment, as they were when it
+  /// started. Only readable for processes of the same user.
+  static func commandLine(_ pid: pid_t) -> (arguments: [String], environment: [String: String])? {
     var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
     var size = 0
     guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size
@@ -83,15 +112,17 @@ nonisolated enum ProcessTable {
     while index < size, buffer[index] == 0 {
       index += 1
     }
+    var arguments: [String] = []
     for _ in 0..<argc {
-      _ = nextString()
+      guard let argument = nextString() else { break }
+      arguments.append(argument)
     }
     var environment: [String: String] = [:]
     while let entry = nextString(), !entry.isEmpty {
       guard let equals = entry.firstIndex(of: "=") else { continue }
       environment[String(entry[..<equals])] = String(entry[entry.index(after: equals)...])
     }
-    return environment
+    return (arguments, environment)
   }
 
   static func startTime(_ info: kinfo_proc) -> Double {

@@ -8,6 +8,8 @@ func runHook(_ arguments: ArraySlice<String>) {
   switch arguments.first {
   case "claude":
     event = claudeEvent(from: input())
+  case "codex":
+    event = codexEvent(from: input())
   default:
     fail(usage)
   }
