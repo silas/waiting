@@ -6,7 +6,8 @@
 # The DMG stays out of $UPDATES_DIR because generate_appcast would treat it as another update.
 #
 # $UPDATES_DIR must keep every past release zip and the current appcast.xml, so generate_appcast
-# can keep the history and build deltas. Point it at a persistent directory, not build/.
+# can keep the history. Point it at a persistent directory, not build/. Delta updates are off: the
+# app is only a few MB zipped, so they'd save little and add a .delta file per past release.
 #
 # One-time setup:
 #   build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys  (EdDSA key → login Keychain)
@@ -67,7 +68,7 @@ codesign --sign "$identity" --timestamp "$dmg"
 xcrun notarytool submit "$dmg" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$dmg"
 
-"$SPARKLE_BIN/generate_appcast" --download-url-prefix https://releases.waiting.dev/ "$UPDATES_DIR"
+"$SPARKLE_BIN/generate_appcast" --maximum-deltas 0 --download-url-prefix https://releases.waiting.dev/ "$UPDATES_DIR"
 
 echo
 echo "Built $zip and $dmg. Upload them with: make upload"

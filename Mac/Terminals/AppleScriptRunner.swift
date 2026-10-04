@@ -7,6 +7,21 @@ enum AppleScriptRunner {
   private static let cacheLimit = 32
   private static var scripts: [String: NSAppleScript] = [:]
 
+  /// While true, only scripts run inside `userInitiated` run; the rest fail as if Automation were
+  /// denied. Running a script can show the Automation prompt, which shouldn't pop up on its own
+  /// over onboarding. Set from launch until onboarding closes.
+  static var isPaused = false
+  private static var isUserInitiated = false
+
+  /// Runs `body` with scripts allowed even while paused: the user asked to be taken to a terminal,
+  /// so a prompt is expected.
+  static func userInitiated<T>(_ body: () -> T) -> T {
+    let previous = isUserInitiated
+    isUserInitiated = true
+    defer { isUserInitiated = previous }
+    return body()
+  }
+
   /// The script's string result, or nil on any error (including a denied Automation permission).
   static func run(_ source: String) -> String? {
     execute(source)?.stringValue
@@ -20,6 +35,7 @@ enum AppleScriptRunner {
   }
 
   private static func execute(_ source: String) -> NSAppleEventDescriptor? {
+    guard !isPaused || isUserInitiated else { return nil }
     let script: NSAppleScript
     if let cached = scripts[source] {
       script = cached

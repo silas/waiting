@@ -20,6 +20,29 @@ import SwiftUI
     didSet { UserDefaults.standard.set(glowsScreenEdge, forKey: Keys.glowsScreenEdge) }
   }
 
+  /// Shows a popup naming the session under the menu bar icon when it starts needing input.
+  var showsPopup: Bool {
+    didSet { UserDefaults.standard.set(showsPopup, forKey: Keys.showsPopup) }
+  }
+
+  /// Plays a sound when a session starts needing input.
+  var playsSound: Bool {
+    didSet { UserDefaults.standard.set(playsSound, forKey: Keys.playsSound) }
+  }
+
+  /// The name of a system alert sound (in `/System/Library/Sounds`), as `NSSound(named:)` takes it.
+  var soundName: String {
+    didSet { UserDefaults.standard.set(soundName, forKey: Keys.soundName) }
+  }
+
+  /// The system alert sounds, by name.
+  static let soundNames: [String] = {
+    let urls =
+      (try? FileManager.default.contentsOfDirectory(
+        at: URL(filePath: "/System/Library/Sounds"), includingPropertiesForKeys: nil)) ?? []
+    return urls.map { $0.deletingPathExtension().lastPathComponent }.sorted()
+  }()
+
   var glowColor: GlowColor {
     didSet { UserDefaults.standard.set(glowColor.rawValue, forKey: Keys.glowColor) }
   }
@@ -54,6 +77,9 @@ import SwiftUI
     static let showsCount = "attention.showsCount"
     static let pulsesIcon = "attention.pulsesIcon"
     static let glowsScreenEdge = "attention.glowsScreenEdge"
+    static let showsPopup = "attention.showsPopup"
+    static let playsSound = "attention.playsSound"
+    static let soundName = "attention.soundName"
     static let glowColor = "attention.glowColor"
     static let customGlowColor = "attention.customGlowColor"
   }
@@ -63,6 +89,9 @@ import SwiftUI
     showsCount = defaults.bool(forKey: Keys.showsCount)
     pulsesIcon = defaults.bool(forKey: Keys.pulsesIcon)
     glowsScreenEdge = defaults.bool(forKey: Keys.glowsScreenEdge)
+    showsPopup = defaults.bool(forKey: Keys.showsPopup)
+    playsSound = defaults.bool(forKey: Keys.playsSound)
+    soundName = defaults.string(forKey: Keys.soundName) ?? "Glass"
     glowColor = defaults.string(forKey: Keys.glowColor).flatMap(GlowColor.init) ?? .accent
     if let rgb = defaults.array(forKey: Keys.customGlowColor) as? [Double], rgb.count == 3 {
       customGlowColor = Color(red: rgb[0], green: rgb[1], blue: rgb[2])
@@ -105,13 +134,35 @@ import SwiftUI
     }
   }
 
-  /// Plays the enabled one-shot effects. Called when a session starts needing input.
-  func announce() {
+  /// Plays the chosen sound, restarting it if it's already playing.
+  func playSound() {
+    guard let sound = NSSound(named: soundName) else { return }
+    sound.stop()
+    sound.play()
+  }
+
+  /// Shows a sample popup, which does nothing when clicked.
+  func previewPopup() {
+    MenuBarPopup.show(title: "my-project", subtitle: "Fix login redirect", agent: "claude")
+  }
+
+  /// Plays the enabled one-shot effects. Called when a session starts needing input. Clicking the
+  /// popup calls `show`.
+  func announce(_ session: Session, show: @escaping () -> Void) {
+    if playsSound {
+      playSound()
+    }
     if pulsesIcon {
       MenuBarList.pulse()
     }
     if glowsScreenEdge {
       ScreenEdgeGlow.flash(color: resolvedGlowColor)
+    }
+    if showsPopup {
+      MenuBarPopup.show(
+        title: session.name, subtitle: session.title ?? session.message ?? "Needs input",
+        agent: session.agent,
+        action: show)
     }
   }
 }

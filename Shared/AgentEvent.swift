@@ -20,6 +20,8 @@ nonisolated struct AgentEvent: Codable, Sendable {
   let sessionID: String
   let state: SessionState
   let cwd: String?
+  /// The session's title, if the harness has one. Nil means unchanged, not cleared.
+  var title: String?
   let message: String?
   let terminal: TerminalLocation?
   /// The agent's own process, so the app can drop sessions whose agent exited without an end event.
@@ -28,8 +30,13 @@ nonisolated struct AgentEvent: Codable, Sendable {
 
   /// Harness-specific extras.
   var claude: ClaudeDetails?
+  var codex: CodexDetails?
 }
 
 nonisolated struct ClaudeDetails: Codable, Sendable {
+  let hookEventName: String
+}
+
+nonisolated struct CodexDetails: Codable, Sendable {
   let hookEventName: String
 }
