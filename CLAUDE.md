@@ -70,7 +70,7 @@ echo '{"session_id":"s1","hook_event_name":"Stop","cwd":"/tmp/demo"}' \
 - The menu bar icon switches to `MenuBarIconAttention` when any session needs input (`SessionStore.waitingCount`). A needs-input session is marked seen (back to idle, until its next event) when its tab becomes focused, when an event arrives while its tab is already focused, or when it's clicked in the menu (`SessionStore.markFocusedSeen`, driven by `FocusMonitor.onChange`).
 - The CLI captures where it runs as a `TerminalLocation` (`Shared/TerminalLocation.swift`, detection in `Shared/TerminalDetection.swift`, which the app also uses on tmux clients):
   - The bundle ID comes from `__CFBundleIdentifier`, then the `TERM_PROGRAM` table, then the first ancestor process that is an app.
-  - The tty is the controlling terminal of the nearest ancestor process.
+  - The tty is the controlling terminal of the furthest ancestor process that has one: the terminal's own. `sudo` (with `use_pty`, as with `sudo --login`) and `script` run their command on a new pty that no terminal knows, so the nearest one wouldn't match any tab. Inside tmux the server has no tty, so it's still the pane's.
   - It also keeps an allowlist of terminal env vars.
   - It records raw identifiers and doesn't interpret them.
 - `Mac/FocusMonitor.swift` watches the frontmost app. While that app has a `TerminalAdapter` (`Mac/Terminals/`), it polls `focusedTabKey()` once a second, because tab switches post no notification.
