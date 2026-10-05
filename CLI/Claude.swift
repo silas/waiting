@@ -40,6 +40,11 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     // The "still waiting" reminder sent ~60s after Stop carries nothing new, and would
     // re-badge a session the user has already seen.
     return nil
+  case "Notification"
+  where ["agent_needs_input", "agent_completed"].contains(input.notificationType):
+    // The agent view (←) relaying a background session's state, which that session reports with
+    // its own hooks. It would badge the agent view's session too.
+    return nil
   case "SessionStart" where input.source == "compact":
     // Sent after compaction, which can happen mid-turn, so it says nothing about the state.
     return nil
@@ -57,6 +62,23 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     return nil
   }
 
+  let process = AgentProcess.detectAgent()
+  let terminal: TerminalLocation?
+  if let jobID = ClaudeAttach.backgroundJobID(sessionID: input.sessionID, agent: process) {
+    // Finding the attach process scans every process with a tty, so the frequent tool hooks skip
+    // it and leave the terminal unchanged.
+    switch input.hookEventName {
+    case "PreToolUse", "PostToolUse":
+      terminal = nil
+    case "UserPromptSubmit":
+      terminal = ClaudeAttach.clientLocation(jobID: jobID) ?? ClaudeAttach.viewerLocation()
+    default:
+      terminal = ClaudeAttach.clientLocation(jobID: jobID)
+    }
+  } else {
+    terminal = .detect()
+  }
+
   return AgentEvent(
     agent: "claude",
     sessionID: input.sessionID,
@@ -66,8 +88,8 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     title: ["Stop", "Notification", "UserPromptSubmit", "SessionStart"].contains(
       input.hookEventName) ? input.transcriptPath.flatMap(ClaudeTranscript.title) : nil,
     message: input.message,
-    terminal: .detect(),
-    process: .detectAgent(),
+    terminal: terminal,
+    process: process,
     timestamp: Date(),
     claude: ClaudeDetails(hookEventName: input.hookEventName)
   )
