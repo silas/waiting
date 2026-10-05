@@ -39,4 +39,7 @@ nonisolated struct ClaudeDetails: Codable, Sendable {
 
 nonisolated struct CodexDetails: Codable, Sendable {
   let hookEventName: String
+  /// The terminal and process were guessed from which terminal UI was typed into last, so they
+  /// may belong to another session (see `CodexClient.find`).
+  var locationIsGuess: Bool?
 }

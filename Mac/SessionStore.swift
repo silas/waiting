@@ -160,7 +160,10 @@ struct Session: Codable, Identifiable {
   @discardableResult func show(_ session: Session) -> Bool {
     AppleScriptRunner.userInitiated {
       learnTabKey(session.id, userIsHere: false)
-      guard let session = sessions[session.id], TerminalAdapters.show(session) else {
+      guard let session = sessions[session.id] else { return false }
+      // A session whose terminal isn't known yet (a Codex terminal UI that couldn't be told apart
+      // from another in the same directory) is only marked seen.
+      guard session.terminal == nil || TerminalAdapters.show(session) else {
         remove(session)
         return false
       }
@@ -175,7 +178,8 @@ struct Session: Codable, Identifiable {
 
   /// Shows the session that has been waiting on the user the longest. When none are waiting,
   /// cycles through the menu order instead: the session after the one in the focused tab, or the
-  /// first session if the focused tab isn't one of ours. Sessions that are gone are skipped.
+  /// first session if the focused tab isn't one of ours. Sessions that are gone, or whose terminal
+  /// isn't known yet, are skipped.
   func showNext() {
     AppleScriptRunner.userInitiated {
       focus.refresh()
@@ -184,10 +188,12 @@ struct Session: Codable, Identifiable {
   }
 
   private func nextSession() -> Session? {
-    let sorted = sorted
     if let waiting = sorted.first, waiting.status == .needsInput {
       return waiting
     }
+    // Sessions with no terminal yet can't be shown, and nothing could tell they're current, so
+    // cycling would keep returning to them.
+    let sorted = sorted.filter { $0.terminal != nil }
     let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     guard
       let current = sorted.firstIndex(where: { focus.isFocused($0) })
@@ -257,15 +263,20 @@ struct Session: Codable, Identifiable {
     session.cwd = event.cwd ?? session.cwd
     session.title = event.title ?? session.title
     session.message = event.state == .needsInput ? event.message : nil
-    // A different terminal (e.g. resumed elsewhere) makes the learned tab key stale.
-    session.terminal = event.terminal ?? session.terminal
-    session.process = event.process ?? session.process
+    // A guessed terminal and process may be another session's, so they only fill in a session
+    // that has neither, and don't replace other sessions below.
+    let isGuess = event.codex?.locationIsGuess == true
+    if !isGuess || (session.terminal == nil && session.process == nil) {
+      // A different terminal (e.g. resumed elsewhere) makes the learned tab key stale.
+      session.terminal = event.terminal ?? session.terminal
+      session.process = event.process ?? session.process
+    }
     session.lastUpdated = event.timestamp
     // `/clear` and `/resume` give the same agent process a new session ID. The old ID's end event
     // may be lost (sent while the app wasn't running, say), so drop any session it left behind.
     // One assignment, so observers see a single change.
     var updated = sessions
-    if let process = event.process {
+    if let process = event.process, !isGuess {
       updated = updated.filter {
         $0.key == id || $0.value.agent != event.agent || $0.value.process != process
       }
