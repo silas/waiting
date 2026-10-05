@@ -83,7 +83,10 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     agent: "claude",
     sessionID: input.sessionID,
     state: state,
-    cwd: input.cwd,
+    // The hook's `cwd` follows the Bash tool's `cd`, so the session would be renamed after each
+    // one. The project directory stays where the session was started.
+    cwd: ProcessInfo.processInfo.environment["CLAUDE_PROJECT_DIR"].flatMap { $0.isEmpty ? nil : $0 }
+      ?? input.cwd,
     // Not for the frequent tool hooks, so they don't read the transcript.
     title: ["Stop", "Notification", "UserPromptSubmit", "SessionStart"].contains(
       input.hookEventName) ? input.transcriptPath.flatMap(ClaudeTranscript.title) : nil,
