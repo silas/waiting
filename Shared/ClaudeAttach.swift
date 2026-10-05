@@ -34,7 +34,7 @@ enum ClaudeAttach {
 
   /// Where the job is shown: the terminal of its newest `claude attach` process, or nil if none.
   static func clientLocation(jobID: String) -> TerminalLocation? {
-    client(jobID: jobID).flatMap(location)
+    client(jobID: jobID).flatMap { location($0) }
   }
 
   /// How recently the user must have typed in the agent view for `viewerLocation` to pick it.
