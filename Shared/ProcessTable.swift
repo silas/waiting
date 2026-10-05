@@ -1,4 +1,4 @@
-import Darwin
+import Foundation
 
 /// Identifies a running process. The start time guards against the PID being reused.
 nonisolated struct AgentProcess: Codable, Sendable, Hashable {
@@ -61,6 +61,14 @@ nonisolated enum ProcessTable {
     guard dev != -1, let name = devname(dev, S_IFCHR) else { return nil }
     let path = "/dev/" + String(cString: name)
     return path == "/dev/??" ? nil : path
+  }
+
+  /// When input was last read from the terminal (its access time, as `w` uses for idle time).
+  static func lastInput(tty: String) -> Date? {
+    var info = stat()
+    guard stat(tty, &info) == 0 else { return nil }
+    let time = info.st_atimespec
+    return Date(timeIntervalSince1970: Double(time.tv_sec) + Double(time.tv_nsec) / 1_000_000_000)
   }
 
   /// Path of the process's executable.

@@ -81,8 +81,9 @@ func codexEvent(from data: Data) -> AgentEvent? {
   }
 
   let isToolHook = ["PreToolUse", "PostToolUse"].contains(input.hookEventName)
-  let (terminal, process) = codexLocation(
-    sessionID: input.sessionID, cwd: input.cwd, findClient: !isToolHook)
+  let (terminal, process, locationIsGuess) = codexLocation(
+    sessionID: input.sessionID, cwd: input.cwd, findClient: !isToolHook,
+    userJustTyped: ["UserPromptSubmit", "SessionStart"].contains(input.hookEventName))
   return AgentEvent(
     agent: "codex",
     sessionID: input.sessionID,
@@ -95,7 +96,7 @@ func codexEvent(from data: Data) -> AgentEvent? {
     terminal: terminal,
     process: process,
     timestamp: Date(),
-    codex: CodexDetails(hookEventName: input.hookEventName)
+    codex: CodexDetails(hookEventName: input.hookEventName, locationIsGuess: locationIsGuess)
   )
 }
 
@@ -112,21 +113,30 @@ func codexEvent(from data: Data) -> AgentEvent? {
 /// Finding the terminal UI scans every process with a tty, so the frequent tool hooks skip it
 /// (`findClient` false): they come between the UserPromptSubmit and Stop that start and end the
 /// turn, which do find it, and the terminal UI can't change in between.
+///
+/// `userJustTyped` is for hooks the user triggered by typing into the session's terminal UI
+/// (submitting a prompt; launching, `/new` or `/resume`), which tells apart terminal UIs sharing a
+/// working directory (see `CodexClient.find`). Not for Stop or PermissionRequest: the user may be
+/// typing into another one in the same directory just then. Even then it's a guess, which is
+/// returned as `isGuess` so the app trusts it less.
 private func codexLocation(
-  sessionID: String, cwd: String?, findClient: Bool
-) -> (TerminalLocation?, AgentProcess?) {
-  guard let agent = AgentProcess.detectAgent() else { return (.detect(), nil) }
+  sessionID: String, cwd: String?, findClient: Bool, userJustTyped: Bool
+) -> (terminal: TerminalLocation?, process: AgentProcess?, isGuess: Bool) {
+  guard let agent = AgentProcess.detectAgent() else { return (.detect(), nil, false) }
   guard let arguments = ProcessTable.commandLine(agent.pid)?.arguments,
     arguments.contains("app-server")
-  else { return (.detect(), agent) }
-  guard arguments.contains("--managed-daemon") else { return (.detect(), nil) }
+  else { return (.detect(), agent, false) }
+  guard arguments.contains("--managed-daemon") else { return (.detect(), nil, false) }
 
   guard findClient,
-    let pid = CodexClient.find(sessionID: sessionID, cwd: cwd),
-    let info = ProcessTable.info(pid)
-  else { return (nil, nil) }
-  let terminal = ProcessTable.environment(pid).flatMap {
-    TerminalLocation.detect(pid: pid, environment: $0)
+    let client = CodexClient.find(sessionID: sessionID, cwd: cwd, userJustTyped: userJustTyped),
+    let info = ProcessTable.info(client.pid)
+  else { return (nil, nil, false) }
+  let terminal = ProcessTable.environment(client.pid).flatMap {
+    TerminalLocation.detect(pid: client.pid, environment: $0)
   }
-  return (terminal, AgentProcess(pid: pid, startTime: ProcessTable.startTime(info)))
+  return (
+    terminal, AgentProcess(pid: client.pid, startTime: ProcessTable.startTime(info)),
+    client.isGuess
+  )
 }
