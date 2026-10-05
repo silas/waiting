@@ -49,10 +49,13 @@ extension TerminalLocation {
     return nil
   }
 
-  /// The controlling terminal of the nearest ancestor that has one.
+  /// The controlling terminal of the furthest ancestor that has one: the terminal's own, which is
+  /// how adapters know its tabs. Programs like `sudo` (with `use_pty`) and `script` run their
+  /// command on a pty of their own, which no terminal knows. Inside tmux, the server has no tty,
+  /// so this is still the pane's.
   private static func detectTTY(pid: pid_t) -> String? {
-    ProcessTable.ancestors(of: pid).lazy.compactMap {
+    ProcessTable.ancestors(of: pid).compactMap {
       ProcessTable.info($0).flatMap(ProcessTable.tty)
-    }.first
+    }.last
   }
 }
