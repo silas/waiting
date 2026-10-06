@@ -12,6 +12,15 @@ nonisolated private struct HookInput: Decodable {
   let source: String?
   /// PreCompact: `manual` or `auto`.
   let trigger: String?
+  /// Set when the hook fires inside a subagent, which shares its parent's `session_id`.
+  let agentID: String?
+  /// Stop: the session's background tasks (subagents, shells) and their status.
+  let backgroundTasks: [BackgroundTask]?
+
+  struct BackgroundTask: Decodable {
+    let type: String?
+    let status: String?
+  }
 
   enum CodingKeys: String, CodingKey {
     case sessionID = "session_id"
@@ -22,6 +31,8 @@ nonisolated private struct HookInput: Decodable {
     case notificationType = "notification_type"
     case source
     case trigger
+    case agentID = "agent_id"
+    case backgroundTasks = "background_tasks"
   }
 }
 
@@ -32,6 +43,12 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     input = try JSONDecoder().decode(HookInput.self, from: data)
   } catch {
     fail("invalid hook input: \(error)")
+  }
+
+  // A subagent's own hooks (its tool use) would mark the parent session working while it waits.
+  // Its permission prompts still need the user.
+  if input.agentID != nil && input.hookEventName != "Notification" {
+    return nil
   }
 
   let state: SessionState
@@ -48,6 +65,11 @@ func claudeEvent(from data: Data) -> AgentEvent? {
   case "SessionStart" where input.source == "compact":
     // Sent after compaction, which can happen mid-turn, so it says nothing about the state.
     return nil
+  case "Stop"
+  where input.backgroundTasks?.contains { $0.type == "subagent" && $0.status == "running" } == true:
+    // Subagents run in the background, so the turn ends while they work. When they finish, the
+    // agent continues on its own (with a UserPromptSubmit), and its next Stop is the real one.
+    state = .working
   case "Stop", "Notification":
     state = .needsInput
   case "UserPromptSubmit", "PreToolUse", "PostToolUse":

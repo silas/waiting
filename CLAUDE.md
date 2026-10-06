@@ -42,6 +42,8 @@ echo '{"session_id":"s1","hook_event_name":"Stop","cwd":"/tmp/demo"}' \
   - It rewrites the file with `JSONSerialization`, so keys end up sorted.
 - `AgentEvent` carries a `SessionState`, generic fields (`cwd`, `title`, `message`, `terminal`), and a per-harness field for extras (`claude: ClaudeDetails`, `codex: CodexDetails`). Keep harness-specific data in that field.
 - The Claude mapping lives in `CLI/Claude.swift`:
+  - Events with an `agent_id` come from a subagent (with its parent's `session_id`) and are dropped, except `Notification` (a subagent's permission prompt still needs the user).
+  - `Stop` while `background_tasks` has a running subagent → working: subagents run in the background, so the turn ends while they work, and the agent continues on its own (with a `UserPromptSubmit`) when they finish. Other background tasks (shells) don't count, since they may never finish.
   - `Stop`/`Notification` → needs input, except `Notification` with `notification_type` `idle_prompt` (the reminder sent about 60s after `Stop`), which is dropped so it doesn't re-badge a session the user has already seen, and `agent_needs_input`/`agent_completed` (the agent view relaying a background session's state, which that session sends itself), which are dropped so the agent view's session isn't badged too
   - `UserPromptSubmit`/`PreToolUse`/`PostToolUse` → working
   - `SessionStart` → idle, except with `source` `compact`, which is dropped because auto-compaction can happen mid-turn
