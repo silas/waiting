@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & run
 
-There is a single Xcode project `mac.xcodeproj` with two targets: `Mac` (the menu bar app, product `Waiting.app`) and `waiting` (a command-line tool). Building the `Mac` scheme also builds `waiting` and embeds it at `Waiting.app/Contents/Helpers/waiting`. It lives in `Helpers`, not `MacOS`, because on a case-insensitive filesystem it would collide with the app executable `Waiting`. There is no test target. The only Swift package is Sparkle (`Mac` target only; `Package.resolved` is in `mac.xcodeproj/project.xcworkspace`).
+There is a single Xcode project `mac.xcodeproj` with two targets: `Mac` (the menu bar app, product `Waiting.app`) and `waiting` (a command-line tool). Building the `Mac` scheme also builds `waiting` and embeds it at `Waiting.app/Contents/Helpers/waiting`. It lives in `Helpers`, not `MacOS`, because on a case-insensitive filesystem it would collide with the app executable `Waiting`. There is no test target in the Xcode project; the unit and e2e tests are separate Swift packages (see Testing). The only Swift package dependency is Sparkle (`Mac` target only; `Package.resolved` is in `mac.xcodeproj/project.xcworkspace`).
 
 ```sh
 # Build (output goes to ./build, which is gitignored)
@@ -28,6 +28,16 @@ build/Build/Products/Debug/Waiting.app/Contents/Helpers/waiting setup vscode
 echo '{"session_id":"s1","hook_event_name":"Stop","cwd":"/tmp/demo"}' \
   | build/Build/Products/Debug/Waiting.app/Contents/Helpers/waiting hook claude
 ```
+
+## Testing
+
+`UnitTests/` is a Swift package (swift-testing) for logic the e2e tests can't easily stage from outside, such as process tables and config files. `make test` runs it; it doesn't need an app build. Its `WaitingCore` target is made of symlinks into the app's sources (`Shared/`, `CLI/CodexClient.swift` and `Mac/Session.swift`), compiled with the Xcode project's concurrency settings, so to test another file, link it into `UnitTests/Sources/WaitingCore`. Code there is tested with `@testable import WaitingCore`; logic that reads the system (processes, files) is split into a gatherer and a pure function that tests call with made-up input, as in `CodexClient.choose`, `AgentHooks.areCodexHooksTrusted` and `Session.next` (which takes the focus checks as closures).
+
+`E2E/` is a Swift package (swift-testing) that tests the built `Waiting.app` and its CLI from the outside. `make e2e` builds, then runs the hook, setup and app tests; `make e2e-live` runs real `claude -p` and `codex exec` sessions, which use the user's sign-in and spend tokens. Both need `CONFIG=Debug`, and `AGENT=claude` (or `codex`) runs one harness's tests (`WAITING_E2E_AGENTS`). Tests run in parallel, so subprocess I/O goes through files, not pipes (other tests' children would hold a pipe open).
+
+- Isolation: the CLI posts to `WAITING_NOTIFICATION_NAME` when set, and each test uses its own name, so the user's running Waiting sees nothing. A Debug app launched with `WAITING_E2E_DIR` runs in test mode (`Mac/TestMode.swift`, compiled out of Release): it listens on `WAITING_NOTIFICATION_NAME`, keeps `sessions.json` in that directory, prunes every 1s, shows no icon, onboarding or alerts, registers no shortcuts, runs no AppleScript, doesn't start Sparkle, and after every change writes `state.json` (sessions in menu order, `waitingCount`, and the sessions `onStartWaiting` fired for). `make reset` and the user's settings are untouched, but it reads the same UserDefaults.
+- `Sources/Listener` prints the events posted under a name (distributed notifications need a run loop, which the test runner lacks). The tests decode them with their own copies of the wire format (`Support/Wire.swift`), so a format change fails them. To check that something posts nothing, they run it and then a sentinel hook, and expect the sentinel's event next.
+- Harnesses: each one is a `Harness` (`E2E/Tests/WaitingE2E/Harness.swift`) in `Harnesses/`. It provides the native hook input for each harness-neutral `Moment`, its config variable, hooks file and events for `waiting setup`, and how to run it non-interactively for the live tests, with hooks from `waiting setup` and without the user's own hooks (Claude: `--settings` with `--setting-sources project`; Codex: a scratch `CODEX_HOME` with a link to `auth.json`, and `--dangerously-bypass-hook-trust`). The shared suites (`HarnessContractTests`, `SetupTests`, the hook-to-app test in `AppTests`, `LiveTests`) run against every harness in `Harnesses.registered`. Rules only one harness has go in its own `<Agent>ContractTests`. To test a new harness, add a `Harness` and register it.
 
 ## Agent hooks → app
 
@@ -118,7 +128,7 @@ echo '{"session_id":"s1","hook_event_name":"Stop","cwd":"/tmp/demo"}' \
   - `ShortcutSettings` persists bindings to UserDefaults (`shortcut.<action>`; a missing key means the default, JSON `null` means cleared) and keeps them registered. It records which actions failed to register (`unavailable`) and suspends all hot keys while one is being recorded.
   - `ShortcutRecorder` captures the next keyDown with a local `NSEvent` monitor. Esc cancels. A shortcut must include ⌃, ⌥ or ⌘ unless it's a function key.
 - The actions are performed in `WaitingApp.init`:
-  - "Jump to waiting or next session" (default ⌃⌥⌘L) calls `SessionStore.showNext`.
+  - "Jump to waiting or next session" (default ⌃⌥⌘L) calls `SessionStore.showNext`, which picks with `Session.next` (`Mac/Session.swift`, where `Session` and the menu order, `Session.menuOrder`, also live).
     - If any session needs input, it shows the longest-waiting one, which is the top of `sorted`.
     - Otherwise it cycles in menu order: it shows the next session after the one in the focused tab that's in a different tab (wrapping around). If no tab can be identified (no adapter, or Automation denied), it continues from the last session it showed while that session's terminal is frontmost; otherwise it shows the first session. Sessions with no terminal info yet are skipped, since showing them does nothing and they'd never count as current.
     - A session whose tab is gone is removed and the next one is tried.

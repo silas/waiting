@@ -82,7 +82,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     var unavailable: Set<ShortcutAction> = []
     for action in ShortcutAction.allCases {
       hotKeys.unregister(action.hotKeyID)
-      guard recording == nil, let shortcut = bindings[action] else { continue }
+      guard recording == nil, !TestMode.isEnabled, let shortcut = bindings[action] else { continue }
       if !hotKeys.register(shortcut, id: action.hotKeyID) {
         unavailable.insert(action)
       }

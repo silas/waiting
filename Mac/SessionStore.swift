@@ -1,54 +1,20 @@
 import AppKit
 import Observation
 
-struct Session: Codable, Identifiable {
-  /// `"\(agent):\(sessionID)"`, so IDs from different harnesses can't collide.
-  let id: String
-  let agent: String
-  var status: SessionState
-  var cwd: String?
-  /// The agent's title for the session (its `/rename` name or generated title), if any.
-  var title: String?
-  var message: String?
-  var terminal: TerminalLocation?
-  /// Tab key worked out by the app, for terminals whose tabs can't be identified from `terminal`
-  /// (see `TerminalAdapter.learnTabKey`), with the terminal it was learned in.
-  var learnedTab: LearnedTab?
-  var process: AgentProcess?
-  var lastUpdated: Date
-
-  struct LearnedTab: Codable {
-    let key: String
-    /// For sessions in tmux, the terminal of the tmux client, which changes when tmux is
-    /// reattached elsewhere.
-    let terminal: TerminalLocation
-  }
-
-  /// The learned tab key, if it was learned in `terminal`. For sessions in tmux, ask this of
-  /// `Tmux.outer`'s session, whose `terminal` is the tmux client's.
-  var learnedTabKey: String? {
-    learnedTab.flatMap { $0.terminal == terminal ? $0.key : nil }
-  }
-
-  /// The name shown for the session: its working directory's name.
-  var name: String {
-    cwd.map { URL(filePath: $0).lastPathComponent } ?? id
-  }
-}
-
 /// Tracks the status of each agent session from events sent by the `waiting` CLI.
 /// State lives in memory. It's saved on quit and restored only by a quick relaunch (such as an
 /// update): events sent while the app isn't running are lost, so an older snapshot can't be trusted.
 @Observable final class SessionStore {
   /// How soon after quitting the app must relaunch for the saved sessions to be restored.
   private static let restoreWindow: TimeInterval = 2 * 60
-  private static let pruneInterval: TimeInterval = 15
+  private static let pruneInterval: TimeInterval = TestMode.isEnabled ? 1 : 15
   /// How long an ended session's events are still ignored for (see `ended`).
   private static let endedGracePeriod: TimeInterval = 60
 
   private(set) var sessions: [String: Session] = [:] {
     didSet {
       focus.tmuxServers = Set(sessions.values.compactMap { Tmux.Pane($0.terminal)?.server })
+      TestMode.dump(self)
     }
   }
 
@@ -71,22 +37,16 @@ struct Session: Codable, Identifiable {
   /// Called when a session starts needing input and isn't in the focused tab.
   @ObservationIgnored var onStartWaiting: ((Session) -> Void)?
 
-  /// Sessions waiting on a human first, longest-waiting first; then the rest, most recent first.
+  /// The sessions in menu order (see `Session.menuOrder`).
   var sorted: [Session] {
-    sessions.values.sorted {
-      let waiting0 = $0.status == .needsInput
-      let waiting1 = $1.status == .needsInput
-      if waiting0 != waiting1 {
-        return waiting0
-      }
-      return waiting0 ? $0.lastUpdated < $1.lastUpdated : $0.lastUpdated > $1.lastUpdated
-    }
+    Session.menuOrder(sessions.values)
   }
 
   private let fileURL: URL
 
   init() {
-    let directory = URL.applicationSupportDirectory.appending(path: "dev.waiting.mac")
+    let directory =
+      TestMode.directory ?? URL.applicationSupportDirectory.appending(path: "dev.waiting.mac")
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     fileURL = directory.appending(path: "sessions.json")
     load()
@@ -115,7 +75,7 @@ struct Session: Codable, Identifiable {
     }
 
     DistributedNotificationCenter.default().addObserver(
-      forName: AgentEvent.notificationName,
+      forName: TestMode.notificationName,
       object: nil,
       queue: .main
     ) { [weak self] notification in
@@ -126,6 +86,8 @@ struct Session: Codable, Identifiable {
         self?.apply(event)
       }
     }
+    // Tells the e2e tests it's listening.
+    TestMode.dump(self)
   }
 
   func remove(_ session: Session) {
@@ -188,24 +150,14 @@ struct Session: Codable, Identifiable {
   }
 
   private func nextSession() -> Session? {
-    if let waiting = sorted.first, waiting.status == .needsInput {
-      return waiting
-    }
-    // Sessions with no terminal yet can't be shown, and nothing could tell they're current, so
-    // cycling would keep returning to them.
-    let sorted = sorted.filter { $0.terminal != nil }
     let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-    guard
-      let current = sorted.firstIndex(where: { focus.isFocused($0) })
-        ?? sorted.firstIndex(where: {
-          $0.id == lastShownID && Tmux.outer($0)?.terminal?.bundleID == frontmost
-        })
-    else {
-      return sorted.first
-    }
-    // Skip other sessions in the same tab, or cycling would get stuck on them.
-    let rest = sorted[(current + 1)...] + sorted[..<current]
-    return rest.first { !focus.isFocused($0) } ?? sorted[current]
+    return Session.next(
+      in: sorted, isFocused: focus.isFocused,
+      // The ID first, since finding a tmux session's client runs tmux.
+      wasLastShownHere: {
+        $0.id == self.lastShownID && Tmux.outer($0)?.terminal?.bundleID == frontmost
+      }
+    )
   }
 
   /// Fills in `learnedTab` for sessions in terminals whose adapter has to work it out. For

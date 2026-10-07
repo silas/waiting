@@ -34,19 +34,28 @@ extension AgentHooks {
     guard let settings = try? hooks.loadSettings(),
       let data = try? Data(contentsOf: hooks.configDirectory.appending(path: "config.toml"))
     else { return false }
+    return hooks.areCodexHooksTrusted(
+      settings: settings, hooksFile: hooks.settingsURL.path,
+      config: String(decoding: data, as: UTF8.self))
+  }
+
+  /// Whether every installed hook in `settings`, the contents of the hooks file at `hooksFile`, has
+  /// a `trusted_hash` in `config`, the text of Codex's `config.toml`.
+  nonisolated func areCodexHooksTrusted(settings: [String: Any], hooksFile: String, config: String)
+    -> Bool
+  {
     // Compare real paths: Codex may write the hooks file's path differently (a symlinked or
     // relative `CODEX_HOME`, a trailing slash).
-    let trusted = Set(
-      trustedKeys(inConfig: String(decoding: data, as: UTF8.self)).compactMap(canonicalKey))
-    guard let file = realPath(hooks.settingsURL.path) else { return false }
+    let trusted = Set(Self.trustedKeys(inConfig: config).compactMap(Self.canonicalKey))
+    guard let file = Self.realPath(hooksFile) else { return false }
     let events = settings["hooks"] as? [String: Any] ?? [:]
-    return hooks.events.allSatisfy { event in
+    return self.events.allSatisfy { event in
       let groups = events[event] as? [[String: Any]] ?? []
       for (groupIndex, group) in groups.enumerated() {
         let entries = group["hooks"] as? [[String: Any]] ?? []
         for (handlerIndex, entry) in entries.enumerated()
-        where hooks.isWaitingCommand(entry["command"] as? String) {
-          return trusted.contains("\(file):\(snakeCase(event)):\(groupIndex):\(handlerIndex)")
+        where isWaitingCommand(entry["command"] as? String) {
+          return trusted.contains("\(file):\(Self.snakeCase(event)):\(groupIndex):\(handlerIndex)")
         }
       }
       return false
