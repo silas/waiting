@@ -1,16 +1,19 @@
 CONFIG ?= Debug
-SOURCES := Mac CLI Shared
+SOURCES := Mac CLI Shared E2E UnitTests/Package.swift UnitTests/Tests
 APP := build/Build/Products/$(CONFIG)/Waiting.app
 CLI := $(APP)/Contents/Helpers/waiting
 # rclone remote for the R2 account (see `upload`)
 R2_REMOTE ?= r2
 # Disk image for the website's fixed download link, built by `release`
 DMG := build/release/Waiting.dmg
+# The e2e tests (see E2E/), against this build. AGENT=claude or codex runs one harness's tests.
+E2E_TEST = WAITING_APP="$(abspath $(APP))" WAITING_E2E_AGENTS="$(AGENT)" \
+	swift test --package-path E2E
 
-.PHONY: help build run stop reset setup-claude setup-codex setup-vscode event format lint hooks release upload clean
+.PHONY: help build run stop reset setup-claude setup-codex setup-vscode event test e2e e2e-live e2e-debug-check format lint hooks release upload clean
 
 help: ## List the targets
-	@awk -F ':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk -F ':.*## ' '/^[a-z0-9-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 build: ## Build Waiting.app and the CLI (CONFIG=Debug or Release)
 	xcodebuild -project mac.xcodeproj -scheme Mac -configuration $(CONFIG) -derivedDataPath build build
@@ -42,6 +45,19 @@ setup-vscode: build ## Install the VS Code extension
 event: ## Send a test hook event (AGENT=claude or codex, EVENT=Stop, SESSION=s1, CWD=/tmp/demo)
 	echo '{"session_id":"$(or $(SESSION),s1)","hook_event_name":"$(or $(EVENT),Stop)","cwd":"$(or $(CWD),/tmp/demo)"}' \
 		| $(CLI) hook $(or $(AGENT),claude)
+
+test: ## Run the unit tests (UnitTests/; no app build needed)
+	swift test --package-path UnitTests
+
+e2e: e2e-debug-check build ## Run the hook, setup and app e2e tests (AGENT=claude or codex for one harness)
+	$(E2E_TEST) --skip Live
+
+e2e-live: e2e-debug-check build ## Run real claude/codex sessions against this build (signs in as you, spends tokens; AGENT= for one)
+	WAITING_E2E_LIVE=1 $(E2E_TEST) --filter Live
+
+# The app's test mode is compiled out of Release builds.
+e2e-debug-check:
+	@test "$(CONFIG)" = Debug || { echo "error: the e2e tests need CONFIG=Debug" >&2; exit 1; }
 
 format: ## Format Swift sources in place
 	xcrun swift-format format --in-place --recursive $(SOURCES)

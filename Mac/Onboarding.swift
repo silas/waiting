@@ -37,7 +37,9 @@ struct OnboardingWindow: Scene {
     // Floats above other apps' windows, so it isn't lost when the user clicks elsewhere.
     .windowLevel(.floating)
     // SwiftUI opens it at launch. Read once, at launch: after onboarding it stays closed.
-    .defaultLaunchBehavior(Onboarding.isCompleted ? .suppressed : .presented)
+    .defaultLaunchBehavior(
+      Onboarding.isCompleted || TestMode.isEnabled ? .suppressed : .presented
+    )
     .restorationBehavior(.disabled)
   }
 }

@@ -35,7 +35,7 @@ enum AppleScriptRunner {
   }
 
   private static func execute(_ source: String) -> NSAppleEventDescriptor? {
-    guard !isPaused || isUserInitiated else { return nil }
+    guard !isPaused || isUserInitiated, !TestMode.isEnabled else { return nil }
     let script: NSAppleScript
     if let cached = scripts[source] {
       script = cached

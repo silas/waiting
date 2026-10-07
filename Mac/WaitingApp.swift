@@ -18,6 +18,10 @@ import SwiftUI
     let attention = AttentionSettings()
     _attention = State(initialValue: attention)
     store.onStartWaiting = { session in
+      guard !TestMode.isEnabled else {
+        TestMode.recordStartedWaiting(session, in: store)
+        return
+      }
       attention.announce(session) {
         if let current = store.sessions[session.id] { store.show(current) }
       }
@@ -31,13 +35,16 @@ import SwiftUI
       })
     let vscode = VSCodeExtensionStatus()
     _vscode = State(initialValue: vscode)
-    Task { await vscode.updateInstalled() }
+    if !TestMode.isEnabled {
+      Task { await vscode.updateInstalled() }
+    }
     LaunchAtLogin.registerOnFirstLaunch()
     _launchAtLogin = State(initialValue: LaunchAtLogin())
   }
 
   var body: some Scene {
-    MenuBarExtra {
+    // The e2e tests' copy runs beside the user's, so it doesn't add a second icon.
+    MenuBarExtra(isInserted: .constant(!TestMode.isEnabled)) {
       ForEach(Array(store.sorted.enumerated()), id: \.element.id) { index, session in
         Button {
           store.show(session)

@@ -12,7 +12,7 @@ import Sparkle
   override init() {
     super.init()
     controller = SPUStandardUpdaterController(
-      startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
+      startingUpdater: !TestMode.isEnabled, updaterDelegate: nil, userDriverDelegate: self)
     observation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) {
       [weak self] updater, _ in
       let canCheck = updater.canCheckForUpdates
