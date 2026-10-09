@@ -180,6 +180,12 @@ private struct SettingsButton: View {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+  /// The app lives in the menu bar, so closing its last window (Settings, onboarding) mustn't quit
+  /// it. Without this, SwiftUI's answer is yes, and AppKit quits once the windows are gone.
+  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    false
+  }
+
   /// Opening the app while it's running (from Finder or Spotlight, say) would have SwiftUI reopen
   /// its first window scene, which is onboarding, even after it's been completed. Open the menu
   /// instead: there's no main window, and whoever opened the app may be looking for the icon.

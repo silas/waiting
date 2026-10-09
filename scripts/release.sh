@@ -5,10 +5,6 @@
 #
 # The DMG stays out of $UPDATES_DIR because generate_appcast would treat it as another update.
 #
-# Release notes come from ReleaseNotes/<version>.md, which must exist. It's copied next to the zip
-# as Waiting-<version>.md, where generate_appcast finds it and embeds it in the appcast item, so
-# Sparkle's update dialog shows it with no separate file to host.
-#
 # $UPDATES_DIR must keep every past release zip and the current appcast.xml, so generate_appcast
 # can keep the history. Point it at a persistent directory, not build/. Delta updates are off: the
 # app is only a few MB zipped, so they'd save little and add a .delta file per past release.
@@ -32,14 +28,9 @@ setting() {
 version=$(setting MARKETING_VERSION)
 build=$(setting CURRENT_PROJECT_VERSION)
 zip="$UPDATES_DIR/Waiting-$version.zip"
-notes="ReleaseNotes/$version.md"
 
 if [[ -e "$zip" ]]; then
     echo "error: $zip already exists. Bump MARKETING_VERSION and CURRENT_PROJECT_VERSION." >&2
-    exit 1
-fi
-if [[ ! -s "$notes" ]]; then
-    echo "error: write the release notes in $notes first." >&2
     exit 1
 fi
 if grep -q REPLACE_WITH_GENERATE_KEYS_OUTPUT Mac/Info.plist; then
@@ -77,8 +68,7 @@ codesign --sign "$identity" --timestamp "$dmg"
 xcrun notarytool submit "$dmg" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$dmg"
 
-cp "$notes" "${zip%.zip}.md"
-"$SPARKLE_BIN/generate_appcast" --maximum-deltas 0 --embed-release-notes \
+"$SPARKLE_BIN/generate_appcast" --maximum-deltas 0 \
     --download-url-prefix https://releases.waiting.dev/ "$UPDATES_DIR"
 
 echo
