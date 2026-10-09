@@ -11,7 +11,7 @@ extension AgentHooks {
     // Keep in sync with the mapping in `CLI/Claude.swift`.
     events: [
       "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop",
-      "PreCompact", "SessionEnd",
+      "StopFailure", "PreCompact", "SessionEnd",
     ],
     isAgentProcess: isClaude
   )

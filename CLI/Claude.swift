@@ -16,10 +16,26 @@ nonisolated private struct HookInput: Decodable {
   let agentID: String?
   /// Stop: the session's background tasks (subagents, shells) and their status.
   let backgroundTasks: [BackgroundTask]?
+  /// StopFailure: the kind of API error that ended the turn, such as `rate_limit`.
+  let error: String?
+  /// StopFailure: the rendered error text.
+  let lastAssistantMessage: String?
+  /// PreToolUse: the tool being called.
+  let toolName: String?
+  let toolInput: ToolInput?
 
   struct BackgroundTask: Decodable {
     let type: String?
     let status: String?
+  }
+
+  struct ToolInput: Decodable {
+    /// AskUserQuestion: the questions it asks.
+    let questions: [Question]?
+
+    struct Question: Decodable {
+      let question: String?
+    }
   }
 
   enum CodingKeys: String, CodingKey {
@@ -33,6 +49,60 @@ nonisolated private struct HookInput: Decodable {
     case trigger
     case agentID = "agent_id"
     case backgroundTasks = "background_tasks"
+    case error
+    case lastAssistantMessage = "last_assistant_message"
+    case toolName = "tool_name"
+    case toolInput = "tool_input"
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    sessionID = try container.decode(String.self, forKey: .sessionID)
+    hookEventName = try container.decode(String.self, forKey: .hookEventName)
+    cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+    transcriptPath = try container.decodeIfPresent(String.self, forKey: .transcriptPath)
+    message = try container.decodeIfPresent(String.self, forKey: .message)
+    notificationType = try container.decodeIfPresent(String.self, forKey: .notificationType)
+    source = try container.decodeIfPresent(String.self, forKey: .source)
+    trigger = try container.decodeIfPresent(String.self, forKey: .trigger)
+    agentID = try container.decodeIfPresent(String.self, forKey: .agentID)
+    backgroundTasks = try container.decodeIfPresent(
+      [BackgroundTask].self, forKey: .backgroundTasks)
+    error = try container.decodeIfPresent(String.self, forKey: .error)
+    lastAssistantMessage = try container.decodeIfPresent(
+      String.self, forKey: .lastAssistantMessage)
+    toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+    // Its shape depends on the tool, so don't fail on one we don't know.
+    toolInput = try? container.decodeIfPresent(ToolInput.self, forKey: .toolInput)
+  }
+}
+
+/// Notification types for something only the user can answer: a permission or MCP prompt, or a
+/// usage-limit wait that didn't resume on its own. Notifications without a type (older Claude
+/// Code versions) count too.
+nonisolated private let promptNotificationTypes: Set<String?> = [
+  nil, "permission_prompt", "elicitation_dialog", "elicitation_url_dialog",
+  "quota_auto_resume_stale", "quota_auto_resume_disabled",
+]
+
+/// Notification types sent as the agent goes back to work: an MCP prompt was answered, or it
+/// resumed after a usage limit.
+nonisolated private let resumedNotificationTypes: Set<String?> = [
+  "elicitation_complete", "elicitation_response", "quota_auto_resume_fired",
+]
+
+/// The item subtitle for a turn that ended on an API error (StopFailure's `error`).
+nonisolated private func failureMessage(error: String?, text: String?) -> String {
+  switch error {
+  case "rate_limit": "Rate limited"
+  case "overloaded": "API overloaded"
+  // Also sent for 529 Overloaded once the retries run out.
+  case "server_error": "API server error"
+  case "authentication_failed", "oauth_org_not_allowed", "cloud_credential_error":
+    "Authentication failed"
+  case "billing_error", "account_on_hold": "Billing problem"
+  case "max_output_tokens": "Output limit reached"
+  default: text.flatMap { $0.isEmpty ? nil : $0 } ?? "API error"
   }
 }
 
@@ -46,22 +116,39 @@ func claudeEvent(from data: Data) -> AgentEvent? {
   }
 
   // A subagent's own hooks (its tool use) would mark the parent session working while it waits.
-  // Its permission prompts still need the user.
-  if input.agentID != nil && input.hookEventName != "Notification" {
+  // Its permission and MCP prompts still need the user.
+  if input.agentID != nil
+    && !(input.hookEventName == "Notification"
+      && promptNotificationTypes.contains(input.notificationType))
+  {
     return nil
   }
 
   let state: SessionState
+  var message = input.message
   switch input.hookEventName {
-  case "Notification" where input.notificationType == "idle_prompt":
-    // The "still waiting" reminder sent ~60s after Stop carries nothing new, and would
-    // re-badge a session the user has already seen.
+  case "Notification" where promptNotificationTypes.contains(input.notificationType):
+    state = .needsInput
+  case "Notification" where resumedNotificationTypes.contains(input.notificationType):
+    state = .working
+  case "Notification":
+    // Dropped: `idle_prompt`, the "still waiting" reminder sent ~60s after Stop, which carries
+    // nothing new and would re-badge a session the user has already seen; `agent_needs_input` and
+    // `agent_completed`, the agent view (←) relaying a background session's state, which that
+    // session reports with its own hooks (it would badge the agent view's session too);
+    // `auth_success`; and types this doesn't know.
     return nil
-  case "Notification"
-  where ["agent_needs_input", "agent_completed"].contains(input.notificationType):
-    // The agent view (←) relaying a background session's state, which that session reports with
-    // its own hooks. It would badge the agent view's session too.
-    return nil
+  case "PreToolUse" where input.toolName == "AskUserQuestion":
+    // Asking the user blocks the turn, and in `bypassPermissions` mode no notification follows.
+    state = .needsInput
+    message = input.toolInput?.questions?.first?.question ?? "Has a question"
+  case "PreToolUse" where input.toolName == "ExitPlanMode":
+    state = .needsInput
+    message = "Plan ready for review"
+  case "StopFailure":
+    // Sent in place of Stop when the turn ends on an API error.
+    state = .needsInput
+    message = failureMessage(error: input.error, text: input.lastAssistantMessage)
   case "SessionStart" where input.source == "compact":
     // Sent after compaction, which can happen mid-turn, so it says nothing about the state.
     return nil
@@ -70,7 +157,7 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     // Subagents run in the background, so the turn ends while they work. When they finish, the
     // agent continues on its own (with a UserPromptSubmit), and its next Stop is the real one.
     state = .working
-  case "Stop", "Notification":
+  case "Stop":
     state = .needsInput
   case "UserPromptSubmit", "PreToolUse", "PostToolUse":
     state = .working
@@ -90,7 +177,7 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     // Finding the attach process scans every process with a tty, so the frequent tool hooks skip
     // it and leave the terminal unchanged.
     switch input.hookEventName {
-    case "PreToolUse", "PostToolUse":
+    case "PreToolUse" where state == .working, "PostToolUse":
       terminal = nil
     case "UserPromptSubmit":
       terminal = ClaudeAttach.clientLocation(jobID: jobID) ?? ClaudeAttach.viewerLocation()
@@ -110,9 +197,10 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     cwd: ProcessInfo.processInfo.environment["CLAUDE_PROJECT_DIR"].flatMap { $0.isEmpty ? nil : $0 }
       ?? input.cwd,
     // Not for the frequent tool hooks, so they don't read the transcript.
-    title: ["Stop", "Notification", "UserPromptSubmit", "SessionStart"].contains(
-      input.hookEventName) ? input.transcriptPath.flatMap(ClaudeTranscript.title) : nil,
-    message: input.message,
+    title: (state == .needsInput
+      || ["Stop", "UserPromptSubmit", "SessionStart"].contains(input.hookEventName))
+      ? input.transcriptPath.flatMap(ClaudeTranscript.title) : nil,
+    message: message,
     terminal: terminal,
     process: process,
     timestamp: Date(),

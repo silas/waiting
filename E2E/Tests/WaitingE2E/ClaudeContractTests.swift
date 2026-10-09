@@ -32,10 +32,91 @@ struct ClaudeContractTests {
     #expect(event.state == .needsInput)
   }
 
-  @Test(arguments: ["idle_prompt", "agent_needs_input", "agent_completed"])
+  @Test(arguments: [
+    "idle_prompt", "agent_needs_input", "agent_completed", "auth_success", "some_future_type",
+  ])
   func droppedNotifications(type: String) async throws {
     try await hooks.expectDropped(
       input(.permissionNeeded(message: "x"), ["notification_type": type]))
+  }
+
+  @Test(arguments: [
+    "elicitation_dialog", "elicitation_url_dialog", "quota_auto_resume_stale",
+    "quota_auto_resume_disabled",
+  ])
+  func promptNotificationsNeedInput(type: String) async throws {
+    let event = try await hooks.event(
+      input(.permissionNeeded(message: "x"), ["notification_type": type]))
+    #expect(event.state == .needsInput)
+    #expect(event.message == "x")
+  }
+
+  @Test func untypedNotificationNeedsInput() async throws {
+    var untyped = input(.permissionNeeded(message: "x"))
+    untyped["notification_type"] = nil
+    #expect(try await hooks.event(untyped).state == .needsInput)
+  }
+
+  @Test(arguments: ["elicitation_complete", "elicitation_response", "quota_auto_resume_fired"])
+  func resumedNotificationsAreWorking(type: String) async throws {
+    let event = try await hooks.event(
+      input(.permissionNeeded(message: "x"), ["notification_type": type]))
+    #expect(event.state == .working)
+  }
+
+  @Test func subagentResumedNotificationIsDropped() async throws {
+    try await hooks.expectDropped(
+      input(
+        .permissionNeeded(message: "x"),
+        ["notification_type": "elicitation_complete", "agent_id": "agent-1"]))
+  }
+
+  @Test func askUserQuestionNeedsInput() async throws {
+    let questions: [[String: Any]] = [
+      ["question": "Which database?", "header": "DB", "options": [["label": "Postgres"]]]
+    ]
+    let event = try await hooks.event(
+      input(
+        .toolStarted, ["tool_name": "AskUserQuestion", "tool_input": ["questions": questions]]))
+    #expect(event.state == .needsInput)
+    #expect(event.message == "Which database?")
+  }
+
+  @Test func exitPlanModeNeedsInput() async throws {
+    let event = try await hooks.event(
+      input(.toolStarted, ["tool_name": "ExitPlanMode", "tool_input": ["plan": "# Plan"]]))
+    #expect(event.state == .needsInput)
+    #expect(event.message == "Plan ready for review")
+  }
+
+  @Test func otherToolsWithUnknownInputAreWorking() async throws {
+    let event = try await hooks.event(
+      input(.toolStarted, ["tool_name": "Write", "tool_input": "not an object"]))
+    #expect(event.state == .working)
+  }
+
+  @Test(arguments: [("rate_limit", "Rate limited"), ("server_error", "API server error")])
+  func stopFailureNeedsInput(error: String, message: String) async throws {
+    let event = try await hooks.event(
+      input(
+        .turnEnded,
+        [
+          "hook_event_name": "StopFailure", "error": error,
+          "last_assistant_message": "API Error: 529 Overloaded. This is a server-side issue…",
+        ]))
+    #expect(event.state == .needsInput)
+    #expect(event.message == message)
+  }
+
+  @Test func unknownStopFailureShowsErrorText() async throws {
+    let event = try await hooks.event(
+      input(
+        .turnEnded,
+        [
+          "hook_event_name": "StopFailure", "error": "unknown",
+          "last_assistant_message": "API Error: 500",
+        ]))
+    #expect(event.message == "API Error: 500")
   }
 
   @Test func subagentNotificationIsKept() async throws {

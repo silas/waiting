@@ -6,7 +6,7 @@ struct ClaudeHarness: Harness {
   let hooksFile = "settings.json"
   let hookEvents = [
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop",
-    "PreCompact", "SessionEnd",
+    "StopFailure", "PreCompact", "SessionEnd",
   ]
   let executable = "claude"
   var description: String { "Claude Code" }

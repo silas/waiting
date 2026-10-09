@@ -76,7 +76,7 @@ upload: ## Upload $UPDATES_DIR and Waiting.dmg to the R2 bucket $R2_BUCKET with 
 	@test -n "$(R2_BUCKET)" || { echo "error: set R2_BUCKET to the R2 bucket name" >&2; exit 1; }
 	@test -f "$(UPDATES_DIR)/appcast.xml" || { echo "error: no appcast.xml in $(UPDATES_DIR)" >&2; exit 1; }
 	@test -f "$(DMG)" || { echo "error: no $(DMG); run make release first" >&2; exit 1; }
-	rclone copy "$(UPDATES_DIR)" "$(R2_REMOTE):$(R2_BUCKET)" --exclude appcast.xml --exclude .DS_Store --progress
+	rclone copy "$(UPDATES_DIR)" "$(R2_REMOTE):$(R2_BUCKET)" --exclude appcast.xml --exclude '*.md' --exclude .DS_Store --progress
 	rclone copyto "$(DMG)" "$(R2_REMOTE):$(R2_BUCKET)/Waiting.dmg" \
 		--header-upload "Cache-Control: no-cache"
 	rclone copyto "$(UPDATES_DIR)/appcast.xml" "$(R2_REMOTE):$(R2_BUCKET)/appcast.xml" \

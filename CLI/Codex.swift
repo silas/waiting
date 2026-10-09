@@ -18,6 +18,12 @@ nonisolated private struct HookInput: Decodable {
   struct ToolInput: Decodable {
     /// PermissionRequest: why the tool needs approval, when Codex knows.
     let description: String?
+    /// PreToolUse for `request_user_input`: the questions it asks.
+    let questions: [Question]?
+
+    struct Question: Decodable {
+      let question: String?
+    }
   }
 
   enum CodingKeys: String, CodingKey {
@@ -57,6 +63,7 @@ func codexEvent(from data: Data) -> AgentEvent? {
   // A subagent's tool calls happen while its parent is working, and its Stop isn't the parent's.
   guard input.agentID == nil else { return nil }
 
+  let isQuestion = ["request_user_input", "request_user_input_async"].contains(input.toolName)
   let state: SessionState
   var message: String?
   switch input.hookEventName {
@@ -68,6 +75,10 @@ func codexEvent(from data: Data) -> AgentEvent? {
   case "PermissionRequest":
     state = .needsInput
     message = input.toolInput?.description ?? input.toolName.map { "Approve \($0)" }
+  case "PreToolUse" where isQuestion:
+    // Questions for the user (plan mode) don't go through PermissionRequest.
+    state = .needsInput
+    message = input.toolInput?.questions?.first?.question ?? "Has a question"
   case "UserPromptSubmit", "PreToolUse", "PostToolUse":
     state = .working
   case "SessionStart", "Interrupt",
@@ -80,7 +91,7 @@ func codexEvent(from data: Data) -> AgentEvent? {
     return nil
   }
 
-  let isToolHook = ["PreToolUse", "PostToolUse"].contains(input.hookEventName)
+  let isToolHook = ["PreToolUse", "PostToolUse"].contains(input.hookEventName) && !isQuestion
   let (terminal, process, locationIsGuess) = codexLocation(
     sessionID: input.sessionID, cwd: input.cwd, findClient: !isToolHook,
     userJustTyped: ["UserPromptSubmit", "SessionStart"].contains(input.hookEventName))
@@ -90,8 +101,10 @@ func codexEvent(from data: Data) -> AgentEvent? {
     state: state,
     cwd: input.cwd,
     // Not for the frequent tool hooks, so they don't read the index.
-    title: ["Stop", "PermissionRequest", "UserPromptSubmit", "SessionStart"].contains(
-      input.hookEventName) ? CodexSessionIndex.title(sessionID: input.sessionID) : nil,
+    title: !isToolHook
+      && ["Stop", "PermissionRequest", "PreToolUse", "UserPromptSubmit", "SessionStart"].contains(
+        input.hookEventName)
+      ? CodexSessionIndex.title(sessionID: input.sessionID) : nil,
     message: message,
     terminal: terminal,
     process: process,

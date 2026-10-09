@@ -31,6 +31,16 @@ struct CodexContractTests {
     #expect(event.message == "Approve shell")
   }
 
+  @Test func requestUserInputNeedsInput() async throws {
+    let questions: [[String: Any]] = [["id": "q1", "question": "Ship it?", "options": []]]
+    let event = try await hooks.event(
+      input(
+        .toolStarted,
+        ["tool_name": "request_user_input", "tool_input": ["questions": questions]]))
+    #expect(event.state == .needsInput)
+    #expect(event.message == "Ship it?")
+  }
+
   @Test func interruptIsIdle() async throws {
     let event = try await hooks.event(input(.turnEnded, ["hook_event_name": "Interrupt"]))
     #expect(event.state == .idle)
