@@ -148,7 +148,7 @@ echo '{"session_id":"s1","hook_event_name":"Stop","cwd":"/tmp/demo"}' \
 - Most Info.plist values are set via `INFOPLIST_KEY_*` build settings in `project.pbxproj`. Keys Xcode doesn't know (Sparkle's `SU*`) go in `Mac/Info.plist`, which is merged into the generated one and excluded from the `Mac` group's resources by an exception set.
 - Entry point is `Mac/WaitingApp.swift` (`@main struct WaitingApp`).
 - Build settings worth knowing:
-  - Deployment target is macOS 27.0.
+  - Deployment target is macOS 26.0.
   - The App Sandbox is disabled (it would block the AppleScript focus queries). Hardened Runtime is on for both targets (required for notarization); the app's `Mac/Waiting.entitlements` has `com.apple.security.automation.apple-events`.
   - `NSAppleEventsUsageDescription` is set via `INFOPLIST_KEY_NSAppleEventsUsageDescription`.
   - Swift 5 language mode with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and approachable concurrency. Code is MainActor-isolated by default, so mark background work `nonisolated` or `@concurrent` explicitly.
