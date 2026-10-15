@@ -24,6 +24,10 @@ import Observation
   /// before the end can arrive after it, and would otherwise bring the session back.
   @ObservationIgnored private var ended: [String: Date] = [:]
 
+  /// Background forks whose first event has been applied (see `apply`), so a fork the user removed
+  /// doesn't end its source again on its next prompt.
+  @ObservationIgnored private var forks: Set<String> = []
+
   /// The session `show` last brought forward, so `showNext` can keep cycling when the focused tab
   /// can't be identified (terminals without an adapter, or Automation permission denied).
   @ObservationIgnored private var lastShownID: String?
@@ -228,6 +232,18 @@ import Observation
     // may be lost (sent while the app wasn't running, say), so drop any session it left behind.
     // One assignment, so observers see a single change.
     var updated = sessions
+    // A Claude Code session sent to the background (← or `/bg`) is forked into a new session ID in
+    // another process. With ←, the interactive process lives on as the agent view and sends no end
+    // event for the session it left. So the fork's first event ends that one, unless the source has
+    // a newer event: it was resumed after the fork, and that event just arrived first.
+    if previous == nil, let source = event.claude?.forkedFrom, forks.insert(id).inserted {
+      let sourceID = "\(event.agent):\(source)"
+      if (updated[sourceID]?.lastUpdated ?? .distantPast) <= event.timestamp {
+        updated[sourceID] = nil
+        // Keep a later end, so events sent before it still can't bring the source back.
+        ended[sourceID] = max(ended[sourceID] ?? event.timestamp, event.timestamp)
+      }
+    }
     if let process = event.process, !isGuess {
       updated = updated.filter {
         $0.key == id || $0.value.agent != event.agent || $0.value.process != process

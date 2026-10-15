@@ -25,6 +25,7 @@ struct WireTerminal: Codable, Equatable, Sendable {
 struct WireDetails: Codable, Equatable, Sendable {
   let hookEventName: String
   var locationIsGuess: Bool?
+  var forkedFrom: String?
 }
 
 /// An `AgentEvent`, as the CLI posts it and the app reads it.
