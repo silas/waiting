@@ -101,6 +101,30 @@ struct AppTests {
     #expect(after.session("claude:new") != nil)
   }
 
+  @Test func backgroundForkEndsItsSource() async throws {
+    let agentView = try StandInProcess()
+    app.post(event("source", .idle, process: agentView.wire))
+    try await app.waitForState { $0.session("claude:source") != nil }
+
+    // ← forks the session into another process; the interactive one stays on as the agent view.
+    let daemon = try StandInProcess()
+    let fork = WireDetails(hookEventName: "UserPromptSubmit", forkedFrom: "source")
+    app.post(event("fork", .working, at: 1, process: daemon.wire, details: fork))
+    var state = try await app.waitForState { $0.session("claude:fork") != nil }
+    #expect(state.session("claude:source") == nil)
+
+    // Sent before the fork, arriving after it.
+    state = try await app.postIgnored(event("source", .needsInput, at: 0.5))
+    #expect(state.session("claude:source") == nil)
+
+    // Only the fork's first event ends it, so resuming the source later sticks.
+    app.post(event("source", .idle, at: 2, process: agentView.wire))
+    try await app.waitForState { $0.session("claude:source") != nil }
+    app.post(event("fork", .needsInput, at: 3, process: daemon.wire, details: fork))
+    state = try await app.waitForState { $0.session("claude:fork")?.status == .needsInput }
+    #expect(state.session("claude:source") != nil)
+  }
+
   @Test func guessedLocationOnlyFillsIn() async throws {
     let agent = try StandInProcess()
     let first = WireTerminal(tty: "/dev/ttys901", environment: [:])

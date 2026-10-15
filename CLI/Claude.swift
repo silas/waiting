@@ -173,14 +173,25 @@ func claudeEvent(from data: Data) -> AgentEvent? {
 
   let process = AgentProcess.detectAgent()
   let terminal: TerminalLocation?
+  var forkedFrom: String?
   if let jobID = ClaudeAttach.backgroundJobID(sessionID: input.sessionID, agent: process) {
     // Finding the attach process scans every process with a tty, so the frequent tool hooks skip
     // it and leave the terminal unchanged.
     switch input.hookEventName {
     case "PreToolUse" where state == .working, "PostToolUse":
       terminal = nil
-    case "UserPromptSubmit":
-      terminal = ClaudeAttach.clientLocation(jobID: jobID) ?? ClaudeAttach.viewerLocation()
+    case "SessionStart", "UserPromptSubmit":
+      // The roster says a fork came from its source for as long as the fork runs, so it's only
+      // read when the fork starts or gets a prompt. Otherwise the fork's first event after
+      // Waiting relaunched would end a source the user has since resumed.
+      let dispatch = ClaudeAttach.dispatch(sessionID: input.sessionID)
+      // The agent view (←) starts a session ahead of time for its next prompt, which would show
+      // as idle though the user never started it. It appears once it gets that prompt.
+      if input.hookEventName == "SessionStart" && dispatch?.isSpare == true { return nil }
+      forkedFrom = dispatch?.forkedFrom
+      terminal =
+        ClaudeAttach.clientLocation(jobID: jobID)
+        ?? (input.hookEventName == "UserPromptSubmit" ? ClaudeAttach.viewerLocation() : nil)
     default:
       terminal = ClaudeAttach.clientLocation(jobID: jobID)
     }
@@ -204,6 +215,6 @@ func claudeEvent(from data: Data) -> AgentEvent? {
     terminal: terminal,
     process: process,
     timestamp: Date(),
-    claude: ClaudeDetails(hookEventName: input.hookEventName)
+    claude: ClaudeDetails(hookEventName: input.hookEventName, forkedFrom: forkedFrom)
   )
 }

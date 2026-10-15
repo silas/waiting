@@ -35,6 +35,8 @@ nonisolated struct AgentEvent: Codable, Sendable {
 
 nonisolated struct ClaudeDetails: Codable, Sendable {
   let hookEventName: String
+  /// The session this background session was forked from (see `ClaudeAttach.Dispatch.forkedFrom`).
+  var forkedFrom: String?
 }
 
 nonisolated struct CodexDetails: Codable, Sendable {

@@ -18,6 +18,49 @@ enum ClaudeAttach {
     return String(sessionID.prefix(8))
   }
 
+  /// How the daemon started a background session, from its roster entry.
+  nonisolated struct Dispatch: Equatable, Sendable {
+    /// The session it was forked from. Sending an interactive session to the background (← or
+    /// `/bg`) forks it into a new session ID in the daemon. With ←, the interactive process lives
+    /// on as the agent view, so the session it left gets no end event and its process doesn't exit.
+    var forkedFrom: String?
+    /// Started ahead of time for the agent view's next prompt: until it gets one, it's not a
+    /// session the user has started.
+    var isSpare: Bool
+  }
+
+  /// The roster entry for a background session, or nil if there's none. The roster is
+  /// undocumented, so a missing or changed file just gives nil.
+  static func dispatch(sessionID: String) -> Dispatch? {
+    let url = AgentHooks.claude.configDirectory.appending(path: "daemon/roster.json")
+    return (try? Data(contentsOf: url)).flatMap { dispatch(sessionID: sessionID, roster: $0) }
+  }
+
+  /// Read field by field rather than decoded, so an entry or field whose shape changes only loses
+  /// what it holds: `{"workers": {<job ID>: {"dispatch": {"sessionId", "source", "launch":
+  /// {"sessionId", "fork"}}}}}`. `source` is what started it: `slash` (← or `/bg`), `spare` (ahead
+  /// of time, for the agent view), …; `launch.sessionId` is the session resumed, a transcript path
+  /// or a session ID.
+  static func dispatch(sessionID: String, roster: Data) -> Dispatch? {
+    guard let root = try? JSONSerialization.jsonObject(with: roster) as? [String: Any],
+      let workers = root["workers"] as? [String: Any],
+      let dispatch = workers.values.lazy
+        .compactMap({ ($0 as? [String: Any])?["dispatch"] as? [String: Any] })
+        .first(where: { $0["sessionId"] as? String == sessionID })
+    else { return nil }
+    var forkedFrom: String?
+    if let launch = dispatch["launch"] as? [String: Any], launch["fork"] as? Bool == true,
+      let source = launch["sessionId"] as? String, !source.isEmpty
+    {
+      // A transcript path (`…/<session ID>.jsonl`) or a session ID.
+      let id =
+        source.hasSuffix(".jsonl")
+        ? URL(filePath: source).deletingPathExtension().lastPathComponent : source
+      forkedFrom = id == sessionID ? nil : id
+    }
+    return Dispatch(forkedFrom: forkedFrom, isSpare: dispatch["source"] as? String == "spare")
+  }
+
   /// The PID of the newest `claude attach` process with a terminal that shows the job, or nil if
   /// no terminal is attached to it.
   static func client(jobID: String) -> pid_t? {
