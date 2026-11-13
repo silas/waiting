@@ -9,6 +9,10 @@ Know when your agents are waiting on you.
 
 Waiting lives in your menu bar and keeps track of your Claude Code and Codex sessions. When one needs you, jump straight to its terminal tab.
 
+## Install
+
+Download [Waiting.dmg](https://github.com/silas/waiting/releases/latest/download/Waiting.dmg) (macOS 26 or later), open it and drag Waiting to Applications. It updates itself from [GitHub Releases](https://github.com/silas/waiting/releases).
+
 ## How it works
 
 1. **Connect your agents.** Open Waiting's Settings to install the hooks, or run `waiting setup claude` or `waiting setup codex` in your terminal.

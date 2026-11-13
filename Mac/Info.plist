@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>SUFeedURL</key>
-	<string>https://releases.waiting.dev/appcast.xml</string>
+	<string>https://github.com/silas/waiting/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>KY52IvnvsvP8eSOqpnGF4HGTqMFBse43kmUFP9v0jK4=</string>
 	<key>SUEnableAutomaticChecks</key>
