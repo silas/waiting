@@ -1,24 +1,27 @@
 #!/bin/bash
-# Builds a notarized Waiting.app, zips it into $UPDATES_DIR and regenerates the Sparkle appcast
-# there, and builds a notarized build/release/Waiting.dmg for the website's download link. Upload
-# both with `make upload` afterwards.
+# Builds a notarized Waiting.app, zips it into build/release/updates with a Sparkle appcast, and
+# builds a notarized build/release/Waiting.dmg. Publish all three as a GitHub release with
+# `make upload` afterwards.
 #
-# The DMG stays out of $UPDATES_DIR because generate_appcast would treat it as another update.
-#
-# $UPDATES_DIR must keep every past release zip and the current appcast.xml, so generate_appcast
-# can keep the history. Point it at a persistent directory, not build/. Delta updates are off: the
-# app is only a few MB zipped, so they'd save little and add a .delta file per past release.
+# Each release is a GitHub release tagged v<version>. The app's feed is the latest release's
+# appcast.xml (https://github.com/silas/waiting/releases/latest/download/appcast.xml), and its
+# enclosure points at that release's zip. generate_appcast gives every item the same download URL
+# prefix, so the appcast holds only the newest version (--maximum-versions 1) and is generated
+# fresh each time. The DMG stays out of the updates directory because generate_appcast would treat
+# it as another update. Delta updates are off: the app is only a few MB zipped.
 #
 # One-time setup:
 #   build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys  (EdDSA key → login Keychain)
 #   xcrun notarytool store-credentials waiting-notary
+#   gh auth login
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-UPDATES_DIR="${UPDATES_DIR:-build/updates}"
+REPO=silas/waiting
 NOTARY_PROFILE="${NOTARY_PROFILE:-waiting-notary}"
 RELEASE_DIR=build/release
+UPDATES_DIR="$RELEASE_DIR/updates"
 SPARKLE_BIN=build/SourcePackages/artifacts/sparkle/Sparkle/bin
 
 setting() {
@@ -27,10 +30,11 @@ setting() {
 }
 version=$(setting MARKETING_VERSION)
 build=$(setting CURRENT_PROJECT_VERSION)
+tag="v$version"
 zip="$UPDATES_DIR/Waiting-$version.zip"
 
-if [[ -e "$zip" ]]; then
-    echo "error: $zip already exists. Bump MARKETING_VERSION and CURRENT_PROJECT_VERSION." >&2
+if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+    echo "error: release $tag already exists. Bump MARKETING_VERSION and CURRENT_PROJECT_VERSION." >&2
     exit 1
 fi
 if grep -q REPLACE_WITH_GENERATE_KEYS_OUTPUT Mac/Info.plist; then
@@ -68,8 +72,8 @@ codesign --sign "$identity" --timestamp "$dmg"
 xcrun notarytool submit "$dmg" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$dmg"
 
-"$SPARKLE_BIN/generate_appcast" --maximum-deltas 0 \
-    --download-url-prefix https://releases.waiting.dev/ "$UPDATES_DIR"
+"$SPARKLE_BIN/generate_appcast" --maximum-versions 1 --maximum-deltas 0 \
+    --download-url-prefix "https://github.com/$REPO/releases/download/$tag/" "$UPDATES_DIR"
 
 echo
-echo "Built $zip and $dmg. Upload them with: make upload"
+echo "Built $zip and $dmg. Publish them with: make upload"

@@ -2,9 +2,9 @@ CONFIG ?= Debug
 SOURCES := Mac CLI Shared E2E UnitTests/Package.swift UnitTests/Tests
 APP := build/Build/Products/$(CONFIG)/Waiting.app
 CLI := $(APP)/Contents/Helpers/waiting
-# rclone remote for the R2 account (see `upload`)
-R2_REMOTE ?= r2
-# Disk image for the website's fixed download link, built by `release`
+# Built by `release` (scripts/release.sh) and published as a GitHub release by `upload`
+REPO := silas/waiting
+UPDATES := build/release/updates
 DMG := build/release/Waiting.dmg
 # The e2e tests (see E2E/), against this build. AGENT=claude or codex runs one harness's tests.
 E2E_TEST = WAITING_APP="$(abspath $(APP))" WAITING_E2E_AGENTS="$(AGENT)" \
@@ -68,19 +68,17 @@ lint: ## Check Swift formatting
 hooks: ## Install the git pre-commit hook in this checkout
 	ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 
-release: ## Build, notarize and publish a release into UPDATES_DIR (see scripts/release.sh)
+release: ## Build and notarize a release into build/release (see scripts/release.sh)
 	scripts/release.sh
 
-upload: ## Upload $UPDATES_DIR and Waiting.dmg to the R2 bucket $R2_BUCKET with rclone, appcast.xml last
-	@test -n "$(UPDATES_DIR)" || { echo "error: set UPDATES_DIR to the releases directory" >&2; exit 1; }
-	@test -n "$(R2_BUCKET)" || { echo "error: set R2_BUCKET to the R2 bucket name" >&2; exit 1; }
-	@test -f "$(UPDATES_DIR)/appcast.xml" || { echo "error: no appcast.xml in $(UPDATES_DIR)" >&2; exit 1; }
+# gh uploads the assets to a draft and publishes it last, so the feed (the latest release's
+# appcast.xml) never points at a release that's missing a file.
+upload: ## Publish the build from `make release` as a GitHub release (zip, Waiting.dmg, appcast.xml)
+	@test -f "$(UPDATES)/appcast.xml" || { echo "error: no $(UPDATES)/appcast.xml; run make release first" >&2; exit 1; }
 	@test -f "$(DMG)" || { echo "error: no $(DMG); run make release first" >&2; exit 1; }
-	rclone copy "$(UPDATES_DIR)" "$(R2_REMOTE):$(R2_BUCKET)" --exclude appcast.xml --exclude '*.md' --exclude .DS_Store --progress
-	rclone copyto "$(DMG)" "$(R2_REMOTE):$(R2_BUCKET)/Waiting.dmg" \
-		--header-upload "Cache-Control: no-cache"
-	rclone copyto "$(UPDATES_DIR)/appcast.xml" "$(R2_REMOTE):$(R2_BUCKET)/appcast.xml" \
-		--header-upload "Cache-Control: no-cache"
+	@zip=$$(ls "$(UPDATES)"/Waiting-*.zip) && version=$$(basename "$$zip" .zip | sed 's/^Waiting-//') && \
+		gh release create "v$$version" "$$zip" "$(DMG)" "$(UPDATES)/appcast.xml" \
+			--repo $(REPO) --title "Waiting $$version" --generate-notes
 
-clean: ## Remove build output (keeps build/updates and Sparkle's tools in build/SourcePackages)
-	find build -mindepth 1 -maxdepth 1 ! -name updates ! -name SourcePackages -exec rm -rf {} +
+clean: ## Remove build output (keeps Sparkle's tools in build/SourcePackages)
+	find build -mindepth 1 -maxdepth 1 ! -name SourcePackages -exec rm -rf {} +
